@@ -4,7 +4,6 @@ All storage is owned by the caller. The C ABI wrappers rebuild typed pointers
 from integer addresses so the exports themselves are not parametric.
 """
 
-from std.algorithm import parallelize
 from std.math import cos, exp, floor, iota, log, pow, sin, sqrt
 from std.sys import simd_width_of
 
@@ -442,23 +441,10 @@ def fft_line(data: Ptr, start: Int, stride: Int, n: Int, inverse: Bool):
 
 
 def fft2(data: Ptr, side: Int, inverse: Bool):
-    if side < 128:
-        for row in range(side):
-            fft_line(data, row * side, 1, side, inverse)
-        for col in range(side):
-            fft_line(data, col, side, side, inverse)
-        return
-
-    @parameter
-    def transform_row(row: Int):
+    for row in range(side):
         fft_line(data, row * side, 1, side, inverse)
-
-    @parameter
-    def transform_col(col: Int):
+    for col in range(side):
         fft_line(data, col, side, side, inverse)
-
-    parallelize[transform_row](side, 8)
-    parallelize[transform_col](side, 8)
 
 
 def grid_coordinates(
