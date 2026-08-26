@@ -12,7 +12,7 @@ from scipy import sparse
 import mojo_opentsne as mot
 from mojo_opentsne import affinity, initialization
 from mojo_opentsne._lib import addr, lib
-from mojo_opentsne.tsne import _csr, _fft_workers
+from mojo_opentsne.tsne import _csr, _fft_workers, _positive
 
 openTSNE = pytest.importorskip("openTSNE")
 from openTSNE import affinity as upstream_affinity
@@ -168,6 +168,41 @@ def test_simd_scalar_tail():
     assert lib().mot_sum_buffer(addr(values), len(values)) == 21
     lib().mot_scale_buffer(addr(values), len(values), 2.5)
     assert np.array_equal(values, np.arange(7, dtype=np.float64) * 2.5)
+
+
+def test_positive_gradient_simd_tail_and_error_elision():
+    rng = np.random.default_rng(31)
+    embedding = np.ascontiguousarray(rng.normal(size=(9, 5)))
+    P = sparse_probabilities(len(embedding), k=4, seed=32)
+    expected_gradient = np.zeros_like(embedding)
+    expected_divergence = 0.0
+    for i in range(len(embedding)):
+        for edge in range(P.indptr[i], P.indptr[i + 1]):
+            j = P.indices[edge]
+            probability = P.data[edge]
+            delta = embedding[i] - embedding[j]
+            dist2 = np.dot(delta, delta)
+            inv = 1.0 / (1.0 + dist2)
+            expected_gradient[i] += probability * inv * delta
+            expected_divergence += probability * (
+                np.log(probability) - np.log(inv)
+            )
+
+    evaluated_gradient = np.zeros_like(embedding)
+    divergence, sum_p = _positive(
+        embedding, embedding, P, evaluated_gradient, 1.0, True
+    )
+    elided_gradient = np.zeros_like(embedding)
+    elided_divergence, elided_sum_p = _positive(
+        embedding, embedding, P, elided_gradient, 1.0, False
+    )
+
+    assert divergence == pytest.approx(expected_divergence, abs=3e-11)
+    assert sum_p == pytest.approx(P.sum(), abs=2e-16)
+    assert np.allclose(evaluated_gradient, expected_gradient, atol=2e-17, rtol=2e-15)
+    assert np.array_equal(elided_gradient, evaluated_gradient)
+    assert elided_divergence == 0
+    assert elided_sum_p == 0
 
 
 def test_csr_indices_cross_ffi_without_copy():

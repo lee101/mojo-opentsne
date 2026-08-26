@@ -88,7 +88,9 @@ def positive_gradient[
     n_ref: Int,
     dim: Int,
     dof: Float64,
+    should_eval_error: Bool,
 ) -> Float64:
+    comptime W = simd_width_of[DType.float64]()
     var divergence = 0.0
     for i in range(n):
         var start = Int(indptr[i])
@@ -97,18 +99,53 @@ def positive_gradient[
             var j = Int(indices[edge])
             if j < 0 or j >= n_ref:
                 continue
+            if dim == 2:
+                var dx = embedding[2 * i] - reference[2 * j]
+                var dy = embedding[2 * i + 1] - reference[2 * j + 1]
+                var dist2_2d = dx * dx + dy * dy
+                var inv_2d = 1.0 / (1.0 + dist2_2d / dof)
+                var prob_2d = values[edge]
+                var coeff_2d = prob_2d * inv_2d
+                gradient[2 * i] += coeff_2d * dx
+                gradient[2 * i + 1] += coeff_2d * dy
+                if should_eval_error and prob_2d > 0.0:
+                    divergence += prob_2d * (
+                        log(prob_2d) - log(kernel_weight(dist2_2d, dof))
+                    )
+                continue
+            var vector_dist2 = SIMD[DType.float64, W](0.0)
             var dist2 = 0.0
-            for k in range(dim):
+            var k = 0
+            while k + W <= dim:
+                var delta = embedding.load[width=W](i * dim + k) - reference.load[
+                    width=W
+                ](j * dim + k)
+                vector_dist2 += delta * delta
+                k += W
+            dist2 = vector_dist2.reduce_add()
+            while k < dim:
                 var delta = embedding[i * dim + k] - reference[j * dim + k]
                 dist2 += delta * delta
+                k += 1
             var inv = 1.0 / (1.0 + dist2 / dof)
             var prob = values[edge]
             var coeff = prob * inv
-            for k in range(dim):
+            k = 0
+            while k + W <= dim:
+                var delta = embedding.load[width=W](i * dim + k) - reference.load[
+                    width=W
+                ](j * dim + k)
+                gradient.store(
+                    i * dim + k,
+                    gradient.load[width=W](i * dim + k) + coeff * delta,
+                )
+                k += W
+            while k < dim:
                 gradient[i * dim + k] += coeff * (
                     embedding[i * dim + k] - reference[j * dim + k]
                 )
-            if prob > 0.0:
+                k += 1
+            if should_eval_error and prob > 0.0:
                 divergence += prob * (
                     log(prob) - log(kernel_weight(dist2, dof))
                 )
@@ -573,7 +610,11 @@ def make_kernel_row(
 
 
 def make_kernel(
-    grid: Ptr, side: Int, spacing: Float64, dof: Float64, component: Int
+    grid: Ptr,
+    side: Int,
+    spacing: Float64,
+    dof: Float64,
+    component: Int,
 ):
     for iy in range(side):
         make_kernel_row(grid, side, spacing, dof, component, iy)
@@ -629,28 +670,20 @@ def interpolate_field(
             + w11 * field[2 * ((iy + 1) * side + ix + 1)]
         )
         if component == 0:
-            var wx0 = 1.0 - tx
-            var wx1 = tx
-            var wy0 = 1.0 - ty
-            var wy1 = ty
-            var self_value = 0.0
-            for ay in range(2):
-                var way = wy0 if ay == 0 else wy1
-                for ax in range(2):
-                    var wax = wx0 if ax == 0 else wx1
-                    for by in range(2):
-                        var wby = wy0 if by == 0 else wy1
-                        for bx in range(2):
-                            var wbx = wx0 if bx == 0 else wx1
-                            var dx = Float64(ax - bx) * spacing
-                            var dy = Float64(ay - by) * spacing
-                            self_value += (
-                                wax
-                                * way
-                                * wbx
-                                * wby
-                                * kernel_weight(dx * dx + dy * dy, dof)
-                            )
+            var same_node = (
+                w00 * w00 + w10 * w10 + w01 * w01 + w11 * w11
+            )
+            var adjacent = (
+                w00 * w10 + w01 * w11 + w00 * w01 + w10 * w11
+            )
+            var diagonal = w00 * w11 + w10 * w01
+            var self_value = (
+                same_node
+                + 2.0 * adjacent * kernel_weight(spacing * spacing, dof)
+                + 2.0
+                * diagonal
+                * kernel_weight(2.0 * spacing * spacing, dof)
+            )
             total += value - self_value
         else:
             gradient[2 * i + component - 1] = value
@@ -815,6 +848,7 @@ def mot_positive_gradient(
     n_ref: Int,
     dim: Int,
     dof: Float64,
+    should_eval_error: Int,
 ) abi("C") -> Float64:
     return positive_gradient(
         ip64(indptr_addr),
@@ -827,6 +861,7 @@ def mot_positive_gradient(
         n_ref,
         dim,
         dof,
+        should_eval_error != 0,
     )
 
 
@@ -842,6 +877,7 @@ def mot_positive_gradient_i32(
     n_ref: Int,
     dim: Int,
     dof: Float64,
+    should_eval_error: Int,
 ) abi("C") -> Float64:
     return positive_gradient(
         ip32(indptr_addr),
@@ -854,6 +890,7 @@ def mot_positive_gradient_i32(
         n_ref,
         dim,
         dof,
+        should_eval_error != 0,
     )
 
 

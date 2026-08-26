@@ -17,8 +17,8 @@ I = ctypes.c_int64
 F = ctypes.c_double
 
 _SIGNATURES = {
-    "mot_positive_gradient": ([I] * 9 + [F], F),
-    "mot_positive_gradient_i32": ([I] * 9 + [F], F),
+    "mot_positive_gradient": ([I] * 9 + [F, I], F),
+    "mot_positive_gradient_i32": ([I] * 9 + [F, I], F),
     "mot_negative_exact": ([I] * 6 + [F, I], F),
     "mot_negative_bh": ([I, I, I, I, I, F, F] + [I] * 11, F),
     "mot_negative_fft": ([I] * 6 + [F] * 4, F),

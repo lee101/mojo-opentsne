@@ -57,7 +57,7 @@ def _objective_inputs(embedding, P, reference_embedding):
     return embedding, reference
 
 
-def _positive(embedding, reference, P, gradient, dof):
+def _positive(embedding, reference, P, gradient, dof, should_eval_error):
     matrix, indptr, indices, values = _csr(P)
     if values.size == 0:
         return 0.0, 0.0
@@ -77,8 +77,11 @@ def _positive(embedding, reference, P, gradient, dof):
         reference.shape[0],
         embedding.shape[1],
         float(dof),
+        int(should_eval_error),
     )
-    sum_p = lib().mot_sum_buffer(addr(values), values.size)
+    sum_p = (
+        lib().mot_sum_buffer(addr(values), values.size) if should_eval_error else 0.0
+    )
     return float(divergence), float(sum_p)
 
 
@@ -241,8 +244,14 @@ def kl_divergence_bh(
         )
         if sum_q < 0:
             sum_q = _negative_exact(embedding, reference, gradient, dof, True)
-    divergence, sum_p = _positive(embedding, reference, P, gradient, dof)
-    error = divergence + sum_p * math.log(sum_q + EPSILON)
+    divergence, sum_p = _positive(
+        embedding, reference, P, gradient, dof, should_eval_error
+    )
+    error = (
+        divergence + sum_p * math.log(sum_q + EPSILON)
+        if should_eval_error
+        else 0.0
+    )
     return (error if should_eval_error else 0.0), gradient
 
 
@@ -266,8 +275,14 @@ def kl_divergence_fft(
         sum_q = _negative_fft(embedding, gradient, dof, fft_params, n_jobs)
     else:
         sum_q = _negative_exact(embedding, reference, gradient, dof, False)
-    divergence, sum_p = _positive(embedding, reference, P, gradient, dof)
-    error = divergence + sum_p * math.log(sum_q + EPSILON)
+    divergence, sum_p = _positive(
+        embedding, reference, P, gradient, dof, should_eval_error
+    )
+    error = (
+        divergence + sum_p * math.log(sum_q + EPSILON)
+        if should_eval_error
+        else 0.0
+    )
     return (error if should_eval_error else 0.0), gradient
 
 

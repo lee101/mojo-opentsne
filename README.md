@@ -79,26 +79,33 @@ rebuilds it when the Mojo source is newer. A packaged deployment can point
 ## Benchmarks
 
 Measured with the checked-in `bench/bench.py`, using one upstream worker and
-the same arrays in both implementations. The Mojo FFT uses eight internal
-workers only for grids of at least 65,536 cells:
+the same arrays in both implementations. The Mojo FFT uses up to eight
+pocketfft workers only for grids of at least 65,536 cells:
 
 Machine: Intel(R) Xeon(R) CPU E5-2697 v4 @ 2.30GHz; Linux x86_64; Python 3.13.14.
 
 | case | mojo-opentsne | openTSNE 1.0.4 | relative |
 | --- | ---: | ---: | ---: |
-| PerplexityBasedNN (5k x 12, p=30) | 334.6 ms | 1247.8 ms | 3.73x faster |
-| Barnes-Hut objective (8k, theta=.5) | 64.6 ms | 68.0 ms | 1.05x faster |
-| Exact objective (2k, theta=0) | 25.8 ms | 251.2 ms | 9.74x faster |
-| FFT interpolation objective (8k) | 39.9 ms | 32.2 ms | 1.24x slower |
+| PerplexityBasedNN (5k x 12, p=30) | 352.4 ms | 1200.4 ms | 3.41x faster |
+| Barnes-Hut objective (8k, theta=.5) | 48.3 ms | 64.3 ms | 1.33x faster |
+| Exact objective (2k, theta=0) | 25.0 ms | 244.7 ms | 9.79x faster |
+| FFT interpolation objective (8k) | 21.5 ms | 30.3 ms | 1.41x faster |
 
 Run `pixi run bench` to reproduce the table. The task takes a machine-wide
 file lock before measuring.
 
-Three measured paths are faster in this run; FFT interpolation is slower.
-The FFT path uses in-place SciPy pocketfft transforms and a denser grid to
-keep bilinear particle-mesh error low. The tests compare the approximate
-gradients, not merely whether the calls complete. The implementation is
-CPU-only.
+All four measured paths are faster in this run. The objective kernels skip KL
+logarithms when error evaluation is disabled, as it is during normal optimizer
+iterations. The FFT path uses in-place SciPy pocketfft transforms, SIMD grid
+kernels, and a closed-form gridded self-potential while retaining the denser
+grid needed for bilinear particle-mesh accuracy. The tests compare the
+approximate gradients, not merely whether the calls complete.
+
+No GPU path is included. The FFT support kernels are memory-bound and remain
+below roughly two floating-point operations per byte moved; the higher-intensity
+FFT itself is already handled by optimized pocketfft. Moving the grids to a GPU
+for the support kernels would add transfers without enough arithmetic work to
+amortize them.
 
 ## How it works
 
@@ -129,11 +136,12 @@ pixi run test
 pixi run bench
 ```
 
-The test suite reports 29 passing numerical and behavioral cases against the installed
+The test suite reports 30 passing numerical and behavioral cases against the installed
 openTSNE 1.0.4 package, including generalized degrees of freedom, transformed
 points, affinity matrices, initialization, optimizer trajectories, callbacks,
-multiscale affinities, quantified FFT approximation accuracy, SIMD tails, the
-FFT parallel threshold, FFI input validation, and zero-copy CSR indices.
+multiscale affinities, quantified FFT approximation accuracy, SIMD tails, KL
+error-work elision, the FFT parallel threshold, FFI input validation, and
+zero-copy CSR indices.
 
 ## License
 
