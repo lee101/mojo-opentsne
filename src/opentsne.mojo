@@ -53,7 +53,7 @@ def scale_buffer(data: Ptr, size: Int, scale: Float64):
     comptime W = simd_width_of[DType.float64]()
     var i = 0
     while i + W <= size:
-        var values = data.load[width=W](i)
+        var values = data.unsafe_load[width=W](i)
         data.store(i, values * scale)
         i += W
     while i < size:
@@ -66,7 +66,7 @@ def sum_buffer(data: Ptr, size: Int) -> Float64:
     var vector_total = SIMD[DType.float64, W](0.0)
     var i = 0
     while i + W <= size:
-        vector_total += data.load[width=W](i)
+        vector_total += data.unsafe_load[width=W](i)
         i += W
     var total = vector_total.reduce_add()
     while i < size:
@@ -117,7 +117,7 @@ def positive_gradient[
             var dist2 = 0.0
             var k = 0
             while k + W <= dim:
-                var delta = embedding.load[width=W](i * dim + k) - reference.load[
+                var delta = embedding.unsafe_load[width=W](i * dim + k) - reference.unsafe_load[
                     width=W
                 ](j * dim + k)
                 vector_dist2 += delta * delta
@@ -132,12 +132,12 @@ def positive_gradient[
             var coeff = prob * inv
             k = 0
             while k + W <= dim:
-                var delta = embedding.load[width=W](i * dim + k) - reference.load[
+                var delta = embedding.unsafe_load[width=W](i * dim + k) - reference.unsafe_load[
                     width=W
                 ](j * dim + k)
                 gradient.store(
                     i * dim + k,
-                    gradient.load[width=W](i * dim + k) + coeff * delta,
+                    gradient.unsafe_load[width=W](i * dim + k) + coeff * delta,
                 )
                 k += W
             while k < dim:
@@ -624,8 +624,8 @@ def multiply_spectrum(density: Ptr, field: Ptr, cells: Int):
     comptime W = simd_width_of[DType.float64]()
     var i = 0
     while i + W <= cells:
-        var density_values = density.load[width=2 * W](2 * i)
-        var field_values = field.load[width=2 * W](2 * i)
+        var density_values = density.unsafe_load[width=2 * W](2 * i)
+        var field_values = field.unsafe_load[width=2 * W](2 * i)
         var ar, ai = density_values.deinterleave()
         var br, bi = field_values.deinterleave()
         var real = ar * br - ai * bi
